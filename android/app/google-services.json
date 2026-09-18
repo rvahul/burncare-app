@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1032300200325",
+    "project_id": "burn-e258f",
+    "storage_bucket": "burn-e258f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1032300200325:android:0429e10451e023b4de44ec",
+        "android_client_info": {
+          "package_name": "burn.kgmu_1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBhYAxkUxdH1G4U9unhi_MCGGGccv6x5b8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
