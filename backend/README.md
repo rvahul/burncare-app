@@ -74,3 +74,12 @@ Build Flutter with the Render URL:
 ```powershell
 flutter build web --release --dart-define=API_BASE_URL=https://YOUR-RENDER-SERVICE.onrender.com
 ```
+
+The repository also includes a GitHub Actions workflow for free GitHub Pages
+hosting. In the repository settings, enable Pages with **GitHub Actions** as
+the source and add an `API_BASE_URL` Actions secret containing the deployed
+backend URL. Push to `master` to build and publish the Flutter web app at:
+
+```text
+https://YOUR-USERNAME.github.io/burncare-app/
+```

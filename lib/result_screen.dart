@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -115,14 +115,15 @@ Future<void> shareAssessmentPdf({
 }
 
 class ResultScreen extends StatelessWidget {
-  final File imageFile;
+  final XFile imageFile;
+  final Future<Uint8List> imageBytes;
   final PatientRecord patient;
   final ui.Image? aiMaskImage;
   final List<MaskStroke> strokes;
   final double? aiMaskCoverage;
   final double burnPercentage;
 
-  const ResultScreen({
+  ResultScreen({
     required this.imageFile,
     required this.patient,
     required this.aiMaskImage,
@@ -130,7 +131,7 @@ class ResultScreen extends StatelessWidget {
     required this.aiMaskCoverage,
     required this.burnPercentage,
     super.key,
-  });
+  }) : imageBytes = imageFile.readAsBytes();
 
   Future<void> _downloadPdf(BuildContext context) async {
     final imageBytes = await imageFile.readAsBytes();
@@ -211,72 +212,81 @@ class ResultScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    patient.name,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${patient.age} years | ${patient.weightKg} kg | ${patient.gender}',
-                  ),
-                  const Divider(height: 24),
-                  Text(
-                    'Final TBSA ${burnPercentage.toStringAsFixed(2)}%',
-                    style: Theme.of(context).textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  if (aiMaskCoverage != null)
-                    Text(
-                      'AI-only estimate: ${aiMaskCoverage!.toStringAsFixed(2)}%',
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
-          _imagePanel(
-            title: 'Original image',
-            child: Image.file(imageFile, fit: BoxFit.contain),
-          ),
-          const SizedBox(height: 20),
-          _imagePanel(
-            title: 'AI-detected region',
-            child: aiMaskImage == null
-                ? const Center(child: Text('AI result unavailable'))
-                : RawImage(image: aiMaskImage, fit: BoxFit.contain),
-          ),
-          const SizedBox(height: 20),
-          _imagePanel(
-            title: 'AI + manual regions',
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.file(imageFile, fit: BoxFit.fill),
-                CustomPaint(
-                  painter: MaskPainter(
-                    aiMaskImage: aiMaskImage,
-                    strokes: strokes,
+      body: FutureBuilder<Uint8List>(
+        future: imageBytes,
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final bytes = snapshot.data!;
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        patient.name,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${patient.age} years | ${patient.weightKg} kg | ${patient.gender}',
+                      ),
+                      const Divider(height: 24),
+                      Text(
+                        'Final TBSA ${burnPercentage.toStringAsFixed(2)}%',
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      if (aiMaskCoverage != null)
+                        Text(
+                          'AI-only estimate: ${aiMaskCoverage!.toStringAsFixed(2)}%',
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: () => _downloadPdf(context),
-            icon: const Icon(Icons.picture_as_pdf_outlined),
-            label: const Text('Download result as PDF'),
-          ),
-        ],
+              ),
+              const SizedBox(height: 20),
+              _imagePanel(
+                title: 'Original image',
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+              const SizedBox(height: 20),
+              _imagePanel(
+                title: 'AI-detected region',
+                child: aiMaskImage == null
+                    ? const Center(child: Text('AI result unavailable'))
+                    : RawImage(image: aiMaskImage, fit: BoxFit.contain),
+              ),
+              const SizedBox(height: 20),
+              _imagePanel(
+                title: 'AI + manual regions',
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(bytes, fit: BoxFit.fill),
+                    CustomPaint(
+                      painter: MaskPainter(
+                        aiMaskImage: aiMaskImage,
+                        strokes: strokes,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => _downloadPdf(context),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text('Download result as PDF'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

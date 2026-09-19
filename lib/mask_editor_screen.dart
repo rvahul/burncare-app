@@ -1,9 +1,9 @@
-import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'dart:ui' as ui;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:http/http.dart' as http;
@@ -17,7 +17,7 @@ const _apiBaseUrl = String.fromEnvironment(
 );
 
 class MaskEditScreen extends StatefulWidget {
-  final File imageFile;
+  final XFile imageFile;
   final PatientRecord patient;
 
   const MaskEditScreen({
@@ -33,6 +33,7 @@ class MaskEditScreen extends StatefulWidget {
 class MaskEditScreenState extends State<MaskEditScreen> {
   final List<MaskStroke> strokes = [];
   late final Future<Size> imageSize;
+  late final Future<Uint8List> originalImageBytes;
   bool isEraser = false;
   bool isPrivacyBrush = false;
   final Set<String> selectedRegions = <String>{};
@@ -65,6 +66,7 @@ class MaskEditScreenState extends State<MaskEditScreen> {
     super.initState();
     ageYears = widget.patient.age > 0 ? widget.patient.age : null;
     weightKg = widget.patient.weightKg > 0 ? widget.patient.weightKg : null;
+    originalImageBytes = widget.imageFile.readAsBytes();
     imageSize = _loadImageSize();
     _detectBurnRegion();
   }
@@ -80,9 +82,11 @@ class MaskEditScreenState extends State<MaskEditScreen> {
         'POST',
         Uri.parse('$_apiBaseUrl/predict'),
       );
-      request.files.add(
-        await http.MultipartFile.fromPath('image', widget.imageFile.path),
-      );
+      request.files.add(http.MultipartFile.fromBytes(
+        'image',
+        await widget.imageFile.readAsBytes(),
+        filename: widget.imageFile.name,
+      ));
       request.fields['sensitivity'] = sensitivity.toString();
       request.fields['enhance'] = enhanceQuality.toString();
       request.fields['blur_face'] = blurFace.toString();
@@ -411,7 +415,20 @@ class MaskEditScreenState extends State<MaskEditScreen> {
                         fit: StackFit.expand,
                         children: [
                           protectedImageBytes == null
-                              ? Image.file(widget.imageFile, fit: BoxFit.fill)
+                              ? FutureBuilder<Uint8List>(
+                                  future: originalImageBytes,
+                                  builder: (context, snapshot) {
+                                    if (!snapshot.hasData) {
+                                      return const Center(
+                                        child: CircularProgressIndicator(),
+                                      );
+                                    }
+                                    return Image.memory(
+                                      snapshot.data!,
+                                      fit: BoxFit.fill,
+                                    );
+                                  },
+                                )
                               : Image.memory(
                                   protectedImageBytes!,
                                   fit: BoxFit.fill,

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -89,7 +87,7 @@ class CameraScreenState extends State<CameraScreen> {
             await navigator.push(
               MaterialPageRoute(
                 builder: (context) => MaskEditScreen(
-                  imageFile: File(image.path),
+                  imageFile: image,
                   patient: widget.patient,
                 ),
               ),
@@ -116,7 +114,7 @@ class CameraScreenState extends State<CameraScreen> {
       await navigator.push(
         MaterialPageRoute(
           builder: (context) => MaskEditScreen(
-            imageFile: File(image.path),
+            imageFile: image,
             patient: widget.patient,
           ),
         ),
