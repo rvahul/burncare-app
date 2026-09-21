@@ -13,7 +13,7 @@ import 'result_screen.dart' show shareAssessmentPdf;
 
 const _apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://10.0.2.2:8000',
+  defaultValue: 'https://burn-detection-api-2hun.onrender.com',
 );
 
 class MaskEditScreen extends StatefulWidget {
@@ -78,23 +78,52 @@ class MaskEditScreenState extends State<MaskEditScreen> {
     });
 
     try {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('$_apiBaseUrl/predict'),
-      );
-      request.files.add(http.MultipartFile.fromBytes(
-        'image',
-        await widget.imageFile.readAsBytes(),
-        filename: widget.imageFile.name,
-      ));
-      request.fields['sensitivity'] = sensitivity.toString();
-      request.fields['enhance'] = enhanceQuality.toString();
-      request.fields['blur_face'] = blurFace.toString();
-      final response = await request.send();
-      final body = await response.stream.bytesToString();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(body);
+      String body = '';
+      const maxAttempts = 3;
+
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          final request = http.MultipartRequest(
+            'POST',
+            Uri.parse('$_apiBaseUrl/predict'),
+          );
+          request.files.add(
+            http.MultipartFile.fromBytes(
+              'image',
+              await widget.imageFile.readAsBytes(),
+              filename: widget.imageFile.name,
+            ),
+          );
+          request.fields['sensitivity'] = sensitivity.toString();
+          request.fields['enhance'] = enhanceQuality.toString();
+          request.fields['blur_face'] = blurFace.toString();
+
+          final response = await request.send().timeout(
+            const Duration(seconds: 30),
+          );
+          body = await response.stream.bytesToString();
+
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            break;
+          }
+
+          if (attempt < maxAttempts) {
+            await Future.delayed(Duration(milliseconds: 1000 * attempt));
+            continue;
+          }
+
+          throw Exception(
+            body.isNotEmpty ? body : 'HTTP ${response.statusCode}',
+          );
+        } catch (error) {
+          if (attempt < maxAttempts) {
+            await Future.delayed(Duration(milliseconds: 1000 * attempt));
+            continue;
+          }
+          rethrow;
+        }
       }
+
       final result = jsonDecode(body) as Map<String, dynamic>;
       final maskBytes = base64Decode(result['maskPngBase64'] as String);
       final maskCodec = await ui.instantiateImageCodec(maskBytes);
@@ -110,8 +139,15 @@ class MaskEditScreenState extends State<MaskEditScreen> {
       });
     } catch (error) {
       if (!mounted) return;
+      final message =
+          error.toString().contains('SocketException') ||
+              error.toString().contains('TimeoutException') ||
+              error.toString().contains('ClientException') ||
+              error.toString().contains('HTTP')
+          ? 'Backend is warming up. Please try again in a few seconds.'
+          : 'Automatic detection unavailable';
       setState(() {
-        detectionError = 'Automatic detection unavailable';
+        detectionError = message;
       });
       debugPrint('Burn detection failed: $error');
     } finally {
