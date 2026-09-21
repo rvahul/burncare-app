@@ -15,41 +15,77 @@ from PIL import Image
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_ROOT = Path(__file__).resolve().parent
 
-model_root_override = os.environ.get("BURN_MODEL_ROOT", "").strip()
-model_path_override = os.environ.get("MODEL_PATH", "").strip()
-candidate_roots = []
-if model_root_override:
-    candidate_roots.append(Path(model_root_override).expanduser())
-if model_path_override:
-    candidate_roots.append(Path(model_path_override).expanduser().parent)
-candidate_roots.extend([
-    BACKEND_ROOT,
-    PROJECT_ROOT,
-    Path.cwd(),
-])
+MODEL_FILENAME_CANDIDATES = [
+    "burn_model_attention_v2.onnx",
+    "model.onnx",
+    "best.onnx",
+]
 
-seen_root_paths = set()
-ordered_roots = []
-for candidate in candidate_roots:
-    try:
-        resolved = candidate.resolve()
-    except OSError:
-        resolved = candidate
-    if resolved not in seen_root_paths:
-        seen_root_paths.add(resolved)
-        ordered_roots.append(resolved)
 
-model_candidates = []
-if model_path_override:
-    model_candidates.append(Path(model_path_override).expanduser())
-for root in ordered_roots:
-    model_candidates.extend([
-        root / "burn_model_attention_v2.onnx",
-        root / "models" / "burn_model_attention_v2.onnx",
-        root / "backend" / "burn_model_attention_v2.onnx",
+def get_current_model_version() -> str:
+    env_version = os.environ.get("CURRENT_MODEL_VERSION", "").strip()
+    if env_version:
+        return env_version
+
+    version_file = BACKEND_ROOT / "models" / "CURRENT_MODEL.txt"
+    if version_file.exists():
+        version = version_file.read_text(encoding="utf-8").strip()
+        if version:
+            return version
+    return "v1"
+
+
+def resolve_model_path() -> Path:
+    model_root_override = os.environ.get("BURN_MODEL_ROOT", "").strip()
+    model_path_override = os.environ.get("MODEL_PATH", "").strip()
+
+    if model_path_override:
+        candidate = Path(model_path_override).expanduser()
+        if candidate.exists():
+            return candidate.resolve()
+
+    candidate_roots = []
+    if model_root_override:
+        candidate_roots.append(Path(model_root_override).expanduser())
+    candidate_roots.extend([
+        BACKEND_ROOT,
+        BACKEND_ROOT / "models" / "versions" / get_current_model_version(),
+        BACKEND_ROOT / "models",
+        PROJECT_ROOT,
+        Path.cwd(),
     ])
 
-MODEL_PATH = next((candidate for candidate in model_candidates if candidate.exists()), Path("burn_model_attention_v2.onnx").resolve())
+    seen_root_paths = set()
+    ordered_roots = []
+    for candidate in candidate_roots:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved not in seen_root_paths:
+            seen_root_paths.add(resolved)
+            ordered_roots.append(resolved)
+
+    for root in ordered_roots:
+        for filename in MODEL_FILENAME_CANDIDATES:
+            path = root / filename
+            if path.exists():
+                return path.resolve()
+
+        version_dir = root / "versions" / get_current_model_version()
+        if version_dir.exists():
+            for filename in MODEL_FILENAME_CANDIDATES:
+                path = version_dir / filename
+                if path.exists():
+                    return path.resolve()
+
+    fallback = BACKEND_ROOT / "models" / "versions" / get_current_model_version() / "burn_model_attention_v2.onnx"
+    if not fallback.exists():
+        fallback = BACKEND_ROOT / "burn_model_attention_v2.onnx"
+    return fallback.resolve()
+
+
+MODEL_PATH = resolve_model_path()
 FACE_CASCADE = cv2.CascadeClassifier(
     os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
 )
@@ -62,11 +98,12 @@ app.add_middleware(
 )
 
 
-@lru_cache(maxsize=1)
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Model not found: {MODEL_PATH}")
-    return ort.InferenceSession(str(MODEL_PATH), providers=["CPUExecutionProvider"])
+@lru_cache(maxsize=8)
+def load_model(model_path: str):
+    path = Path(model_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Model not found: {path}")
+    return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
 
 
 def encode_overlay(mask: np.ndarray) -> str:
@@ -101,9 +138,26 @@ def encode_image(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def get_model_metadata() -> dict:
+    active_model = resolve_model_path()
+    return {
+        "version": get_current_model_version(),
+        "path": str(active_model),
+        "filename": active_model.name,
+        "exists": active_model.exists(),
+        "resolved_from_current_version_file": (BACKEND_ROOT / "models" / "CURRENT_MODEL.txt").exists(),
+    }
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": os.path.basename(MODEL_PATH)}
+    metadata = get_model_metadata()
+    return {"status": "ok", "model": metadata["filename"], "version": metadata["version"]}
+
+
+@app.get("/model/active")
+def model_active():
+    return get_model_metadata()
 
 
 @app.post("/predict")
@@ -128,7 +182,8 @@ async def predict(
             processed = protect_face(processed)
         input_image = np.asarray(processed.resize((256, 256)), dtype=np.float32) / 255.0
         input_tensor = np.transpose(input_image, (2, 0, 1))[None, ...]
-        session = load_model()
+        active_model = resolve_model_path()
+        session = load_model(str(active_model))
         output_name = session.get_outputs()[0].name
         input_name = session.get_inputs()[0].name
         logits = session.run([output_name], {input_name: input_tensor})[0]
